@@ -1,0 +1,70 @@
+# Azure DevOps Pipeline for Song Analyzer (utilizing Microsoft AI/Cognitive Services)
+
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  # Python version to use
+  pythonVersion: '3.10'
+  # Reference your pipeline secrets here (defined in Azure DevOps UI under Library -> Variable Groups)
+  # AZURE_COGNITIVE_KEY: $(azureCognitiveKey)
+  # AZURE_COGNITIVE_ENDPOINT: $(azureCognitiveEndpoint)
+
+steps:
+# Step 1: Set up the Python environment
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: '$(pythonVersion)'
+  displayName: 'Install Python $(pythonVersion)'
+
+# Step 2: Install dependencies (libraries like azure-ai-textanalytics, librosa, numpy, etc.)
+- script: |
+    python -m pip install --upgrade pip
+    if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+  displayName: 'Install dependencies'
+
+# Step 3: Run Linter (Optional but highly recommended to ensure code quality)
+- script: |
+    pip install flake8
+    # stop the build if there are Python syntax errors or undefined names
+    flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+  displayName: 'Lint with flake8'
+
+# Step 4: Run Unit Tests
+# This step passes your Microsoft Analyzer secrets into the test environment securely
+- script: |
+    pip install pytest pytest-cov
+    pytest tests/ --doctest-modules --junitxml=junit/test-results.xml --cov=. --cov-report=xml
+  env:
+    AZURE_COGNITIVE_KEY: $(azureCognitiveKey)
+    AZURE_COGNITIVE_ENDPOINT: $(azureCognitiveEndpoint)
+  displayName: 'Run tests and generate coverage'
+
+# Step 5: Publish Test Results to Azure DevOps
+- task: PublishTestResults@2
+  condition: succeededOrFailed()
+  inputs:
+    testResultsFiles: '**/test-*.xml'
+    testRunTitle: 'Publish test results'
+  displayName: 'Publish Test Results'
+
+# Step 6: Package the application (Preparing for deployment)
+- task: ArchiveFiles@2
+  inputs:
+    rootFolderOrFile: '$(System.DefaultWorkingDirectory)'
+    includeRootFolder: false
+    archiveType: 'zip'
+    archiveFile: '$(Build.ArtifactStagingDirectory)/song-analyzer-$(Build.BuildId).zip'
+    replaceExistingArchive: true
+  displayName: 'Archive application files'
+
+# Step 7: Publish the artifact so it can be deployed in a Release Pipeline
+- task: PublishBuildArtifacts@1
+  inputs:
+    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+    ArtifactName: 'drop'
+    publishLocation: 'Container'
+  displayName: 'Publish Artifact (Drop)'
